@@ -1,0 +1,63 @@
+uniform float4x4 ViewProj;
+uniform texture2d image;
+
+uniform float3 gain;
+uniform float contrast;
+uniform float saturation;
+uniform float sharp;
+uniform float2 texel;
+
+sampler_state texSampler {
+	Filter   = Linear;
+	AddressU = Clamp;
+	AddressV = Clamp;
+};
+
+struct VertData {
+	float4 pos : POSITION;
+	float2 uv  : TEXCOORD0;
+};
+
+VertData VSDefault(VertData v_in)
+{
+	VertData vert_out;
+	vert_out.pos = mul(float4(v_in.pos.xyz, 1.0), ViewProj);
+	vert_out.uv  = v_in.uv;
+	return vert_out;
+}
+
+float4 PSAuto(VertData v_in) : TARGET
+{
+	float4 c = image.Sample(texSampler, v_in.uv);
+
+	/* Ketajaman: tambah selisih antara pixel dan rata-rata tetangganya */
+	float3 blur =
+		image.Sample(texSampler, v_in.uv + float2( texel.x, 0.0)).rgb +
+		image.Sample(texSampler, v_in.uv + float2(-texel.x, 0.0)).rgb +
+		image.Sample(texSampler, v_in.uv + float2(0.0,  texel.y)).rgb +
+		image.Sample(texSampler, v_in.uv + float2(0.0, -texel.y)).rgb;
+	blur *= 0.25;
+
+	float3 rgb = c.rgb + sharp * (c.rgb - blur);
+
+	/* Gain warna + exposure */
+	rgb *= gain;
+
+	/* Kontras di sekitar abu-abu tengah */
+	rgb = (rgb - 0.5) * contrast + 0.5;
+
+	/* Saturasi */
+	float l = dot(rgb, float3(0.299, 0.587, 0.114));
+	rgb = lerp(float3(l, l, l), rgb, saturation);
+
+	return float4(saturate(rgb), c.a);
+}
+
+technique Draw
+{
+	pass
+	{
+		vertex_shader = VSDefault(v_in);
+		pixel_shader  = PSAuto(v_in);
+	}
+}
